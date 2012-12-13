@@ -3200,7 +3200,12 @@ bool OMXCodec::drainInputBuffer(BufferInfo *info) {
 
             status_t err = mOMX->getParameter(mNode, OMX_IndexParamPortDefinition,
             &def, sizeof(def));
-            CHECK_EQ(err, (status_t)OK);
+            
+#ifdef QCOM_LEGACY_OMX
+                // Don't run this check with the legacy encoder
+                if (strncmp(mComponentName, "OMX.qcom.video.encoder.", 23))
+#endif
+                    CHECK_EQ(err, (status_t)OK)
 
             if (def.eDomain == OMX_PortDomainVideo) {
                 OMX_VIDEO_PORTDEFINITIONTYPE *videoDef = &def.format.video;
