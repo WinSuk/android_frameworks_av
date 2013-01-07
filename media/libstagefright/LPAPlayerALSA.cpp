@@ -19,7 +19,7 @@
  */
 
 #define LOG_NDDEBUG 0
-#define LOG_NDEBUG 0
+//#define LOG_NDEBUG 0
 #define LOG_TAG "LPAPlayerALSA"
 
 #include <utils/Log.h>
@@ -782,6 +782,8 @@ void LPAPlayer::onPauseTimeOut() {
         }
         ALOGV("newseek time = %lld ", mSeekTimeUs);
         // 2.) Close routing Session
+        mAudioSink->flush();
+        mAudioSink->stop();
         mAudioSink->close();
         mIsAudioRouted = false;
     }
