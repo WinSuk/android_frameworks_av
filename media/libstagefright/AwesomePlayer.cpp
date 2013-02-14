@@ -50,6 +50,7 @@
 #endif
 #include <media/stagefright/DataSource.h>
 #include <media/stagefright/FileSource.h>
+#include <media/stagefright/FMRadioSource.h>
 #include <media/stagefright/MediaBuffer.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaExtractor.h>
@@ -233,7 +234,7 @@ AwesomePlayer::AwesomePlayer()
     mAudioStatusEventPending = false;
 
     reset();
-#ifdef QCOM_ENHANCED_AUDIO
+#ifdef USE_TUNNEL_MODE
     mIsTunnelAudio = false;
 #endif
 }
@@ -245,7 +246,7 @@ AwesomePlayer::~AwesomePlayer() {
 
     reset();
 
-#ifdef QCOM_ENHANCED_AUDIO
+#ifdef USE_TUNNEL_MODE
     // Disable Tunnel Mode Audio
     if (mIsTunnelAudio) {
         if(mTunnelAliveAP > 0) {
@@ -1043,7 +1044,7 @@ status_t AwesomePlayer::play_l() {
             // We don't want to post an error notification at this point,
             // the error returned from MediaPlayer::start() will suffice.
             bool sendErrorNotification = false;
-#ifdef QCOM_ENHANCED_AUDIO
+#ifdef IS_TUNNEL_MODE
             if(mIsTunnelAudio) {
                 // For tunnel Audio error has to be posted to the client
                 sendErrorNotification = true;
@@ -1546,28 +1547,28 @@ status_t AwesomePlayer::initAudioDecoder() {
     }
     ALOGV("nchannels %d;LPA will be skipped if nchannels is > 2 or nchannels == 0",
            nchannels);
-
+#endif
 #ifdef USE_TUNNEL_MODE
-    char value[PROPERTY_VALUE_MAX];
-    char tunnelDecode[128];
+    char tunnelDecode[PROPERTY_VALUE_MAX];
     property_get("tunnel.decode",tunnelDecode,"0");
     // Enable tunnel mode for mp3 and aac and if the clip is not aac adif
     // and if no other tunnel mode instances aare running.
     ALOGD("Tunnel Mime Type: %s, object alive = %d, mTunnelAliveAP = %d",\
             mime, (TunnelPlayer::mTunnelObjectsAlive), mTunnelAliveAP);
-    if(((strcmp("true",tunnelDecode) == 0)||(atoi(tunnelDecode))) &&
-            (TunnelPlayer::mTunnelObjectsAlive == 0) &&
-             //widevine will fallback to software decoder
-            mTunnelAliveAP == 0 && (isADTS == 0) && mAudioSink->realtime() &&
-            ((!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_MPEG)) ||
-            (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AMR_WB))       ||
-            (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AMR_WB_PLUS))  ||
-            (!strcasecmp(mime,MEDIA_MIMETYPE_AUDIO_AAC)))) {
 
-        if(mVideoSource != NULL) {
-           char tunnelAVDecode[128];
+    bool sys_prop_enabled = !strcmp("true",tunnelDecode) || atoi(tunnelDecode);
+
+    //widevine will fallback to software decoder
+    if (sys_prop_enabled && (TunnelPlayer::mTunnelObjectsAlive == 0) &&
+        mTunnelAliveAP == 0 && (isADTS == 0) &&
+        mAudioSink->realtime() &&
+        inSupportedTunnelFormats(mime)) {
+
+        if (mVideoSource != NULL) {
+           char tunnelAVDecode[PROPERTY_VALUE_MAX];
            property_get("tunnel.audiovideo.decode",tunnelAVDecode,"0");
-           if(((strncmp("true", tunnelAVDecode, 4) == 0)||(atoi(tunnelAVDecode)))) {
+           sys_prop_enabled = !strncmp("true", tunnelAVDecode, 4) || atoi(tunnelAVDecode);
+           if (sys_prop_enabled) {
                ALOGD("Enable Tunnel Mode for A-V playback");
                mIsTunnelAudio = true;
            }
@@ -1579,7 +1580,6 @@ status_t AwesomePlayer::initAudioDecoder() {
     }
     else
        ALOGD("Normal Audio Playback");
-#endif
 
     if (isStreamingHTTP()) {
       ALOGV("Streaming, force disable tunnel mode playback");
@@ -2416,6 +2416,15 @@ status_t AwesomePlayer::finishSetDataSource_l() {
                 return UNKNOWN_ERROR;
             }
         }
+#ifdef STE_FM
+    } else if (!strncasecmp("fmradio://rx", mUri.string(), 12)) {
+        sniffedMIME = MEDIA_MIMETYPE_AUDIO_RAW;
+        dataSource = new FMRadioSource();
+        status_t err = dataSource->initCheck();
+        if (err != OK) {
+            return err;
+        }
+#endif
     } else {
         dataSource = DataSource::CreateFromURI(mUri.string(), &mUriHeaders);
     }
@@ -3022,4 +3031,36 @@ inline int64_t AwesomePlayer::getTimeOfDayUs() {
 
     return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
 }
+
+#ifdef USE_TUNNEL_MODE
+bool AwesomePlayer::inSupportedTunnelFormats(const char * mime) {
+    const char * tunnelFormats [ ] = {
+        MEDIA_MIMETYPE_AUDIO_MPEG,
+        MEDIA_MIMETYPE_AUDIO_AAC,
+#ifdef TUNNEL_MODE_SUPPORTS_AMRWB
+        MEDIA_MIMETYPE_AUDIO_AMR_WB,
+        MEDIA_MIMETYPE_AUDIO_AMR_WB_PLUS
+#endif
+    };
+
+    if (!mime) {
+        return false;
+    }
+
+    size_t len = sizeof(tunnelFormats)/sizeof(const char *);
+    for (size_t i = 0; i < len; i++) {
+        const char * tf = tunnelFormats[i];
+        if (!strncasecmp(mime, tf, strlen(tf))) {
+            if (strlen(mime) == strlen(tf)) { //to prevent a substring match
+                ALOGD("Tunnel playback supported for %s", tf);
+                return true;
+            }
+        }
+    }
+
+    ALOGW("Tunnel playback unsupported for %s", mime);
+    return false;
+}
+#endif
+
 }  // namespace android
